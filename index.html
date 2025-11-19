@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Podcast RSS 封面提取工具</title>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --bg-color: #f8fafc;
+            --border-color: #cbd5e1;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: var(--bg-color);
+            color: #333;
+        }
+
+        h1 { text-align: center; color: #1e293b; margin-bottom: 30px; }
+
+        .section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+        }
+
+        .section-header {
+            font-weight: bold;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .label-step {
+            background: var(--primary-color);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            margin-right: 8px;
+        }
+
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-family: monospace;
+            font-size: 14px;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        button:hover { background-color: #1d4ed8; }
+        button:disabled { background-color: #94a3b8; cursor: not-allowed; }
+
+        .controls { margin-top: 10px; text-align: right; }
+
+        /* 图片展示区域 grid */
+        #image-gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 20px;
+            margin-top: 10px;
+        }
+
+        .img-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #fff;
+            transition: transform 0.2s;
+        }
+
+        .img-card:hover { transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+
+        .img-card img {
+            width: 100%;
+            height: auto;
+            display: block;
+            aspect-ratio: 1/1;
+            object-fit: cover;
+        }
+
+        .img-info {
+            padding: 8px;
+            font-size: 12px;
+            color: #64748b;
+            word-break: break-all;
+            background: #f1f5f9;
+            text-align: center;
+        }
+
+        .error-msg { color: #ef4444; font-size: 0.9em; margin-top: 5px; display: none; }
+    </style>
+</head>
+<body>
+
+    <h1>Podcast RSS 图片提取器</h1>
+
+    <div class="section">
+        <div class="section-header">
+            <span><span class="label-step">1</span> 输入 Podcast RSS 地址</span>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <input type="text" id="rss-url" placeholder="例如: https://feed.xyzfm.space/y9qnpfdrctnx" value="https://feed.xyzfm.space/y9qnpfdrctnx">
+            <button id="btn-fetch" onclick="fetchRSS()">获取内容</button>
+        </div>
+        <div id="fetch-error" class="error-msg"></div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span><span class="label-step">2</span> RSS XML 内容 (可编辑)</span>
+            <button style="font-size: 0.8em; padding: 5px 10px;" onclick="analyzeContent()">↓ 解析图片地址</button>
+        </div>
+        <textarea id="rss-content" placeholder="RSS XML 内容将显示在这里，也可以手动粘贴..."></textarea>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span><span class="label-step">3</span> 图片地址列表 (每行一个，可编辑)</span>
+            <button style="font-size: 0.8em; padding: 5px 10px;" onclick="renderImages()">↓ 显示图片</button>
+        </div>
+        <textarea id="img-urls" style="min-height: 100px;" placeholder="https://..."></textarea>
+        <div style="font-size: 0.85em; color: #666; margin-top: 5px;">
+            * 已自动去重，您可以手动添加或删除行。
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span><span class="label-step">4</span> 图片预览</span>
+            <span id="img-count" style="font-size: 0.9em; color: #666;"></span>
+        </div>
+        <div id="image-gallery">
+            <div style="grid-column: 1/-1; text-align: center; color: #999; padding: 20px;">
+                等待渲染...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 1. 获取 RSS 内容
+        async function fetchRSS() {
+            const urlInput = document.getElementById('rss-url');
+            const contentArea = document.getElementById('rss-content');
+            const errorMsg = document.getElementById('fetch-error');
+            const btn = document.getElementById('btn-fetch');
+
+            const url = urlInput.value.trim();
+            if (!url) return;
+
+            btn.disabled = true;
+            btn.textContent = "获取中...";
+            errorMsg.style.display = 'none';
+
+            try {
+                // 注意：由于浏览器 CORS (跨域) 限制，很多 RSS 源无法直接通过 JS fetch 获取。
+                // 如果失败，通常需要后端代理。这里尝试直接获取，如果失败会提示用户手动复制。
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const text = await response.text();
+                
+                contentArea.value = text;
+                // 自动触发下一步
+                analyzeContent();
+            } catch (e) {
+                console.error(e);
+                errorMsg.style.display = 'block';
+                errorMsg.innerHTML = `获取失败 (${e.message})。<br>可能是因为<b>跨域限制(CORS)</b>。请直接在浏览器打开该链接，按 Ctrl+U 查看源代码，复制全部内容并粘贴到下方的文本框中。`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "获取内容";
+            }
+        }
+
+        // 2. 分析内容提取图片链接
+        function analyzeContent() {
+            const content = document.getElementById('rss-content').value;
+            const urlArea = document.getElementById('img-urls');
+            
+            if (!content) return;
+
+            // 正则表达式匹配 <itunes:image href="...">
+            // 同时兼容单引号和双引号，以及可能存在的空格
+            const regex = /<itunes:image[^>]+href=["']([^"']+)["']/gi;
+            
+            let matches;
+            let urls = new Set(); // 使用 Set 自动去重
+
+            while ((matches = regex.exec(content)) !== null) {
+                // matches[1] 是捕获组，即 href 中的内容
+                if (matches[1]) {
+                    urls.add(matches[1]);
+                }
+            }
+
+            // 为了兼容性，也可以尝试匹配标准 RSS 的 <image><url>...</url></image>
+            const standardRegex = /<url>(https?:\/\/[^<]+(?:\.jpg|\.png|\.jpeg)[^<]*)<\/url>/gi;
+            while ((matches = standardRegex.exec(content)) !== null) {
+                if(matches[1]) urls.add(matches[1]);
+            }
+
+            // 将 Set 转为数组并用换行符连接
+            urlArea.value = Array.from(urls).join('\n');
+            
+            // 自动触发下一步
+            renderImages();
+        }
+
+        // 3. 渲染图片
+        function renderImages() {
+            const urlText = document.getElementById('img-urls').value;
+            const gallery = document.getElementById('image-gallery');
+            const countLabel = document.getElementById('img-count');
+
+            gallery.innerHTML = ''; // 清空现有图片
+
+            // 按行分割，过滤空行和空格
+            const urls = urlText.split('\n').map(u => u.trim()).filter(u => u.length > 0);
+
+            countLabel.textContent = `共找到 ${urls.length} 张图片`;
+
+            if (urls.length === 0) {
+                gallery.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #999; padding: 20px;">暂无图片链接</div>';
+                return;
+            }
+
+            urls.forEach((url, index) => {
+                const card = document.createElement('div');
+                card.className = 'img-card';
+                
+                const img = document.createElement('img');
+                img.src = url;
+                img.alt = `Cover ${index + 1}`;
+                img.loading = "lazy"; // 懒加载
+                
+                // 添加点击在新标签打开的功能
+                img.style.cursor = "pointer";
+                img.onclick = () => window.open(url, '_blank');
+                img.onerror = () => { img.src = 'https://via.placeholder.com/150?text=Error'; }; // 简单的错误处理
+
+                const info = document.createElement('div');
+                info.className = 'img-info';
+                // 只显示文件名部分，避免太长
+                const fileName = url.split('/').pop().split('?')[0];
+                info.textContent = fileName.length > 20 ? fileName.substring(0, 17) + '...' : fileName;
+                info.title = url; // 鼠标悬停显示完整 URL
+
+                card.appendChild(img);
+                card.appendChild(info);
+                gallery.appendChild(card);
+            });
+        }
+
+        // 监听文本框变化，实现手动修改后的实时或半实时响应
+        // 第二步修改后，不自动解析，避免修改到一半被打断，需手动点击“解析”按钮
+        // 第三步修改后，可以监听 input 事件还是建议按钮触发？
+        // 题目要求可手工编辑，为了体验，保留按钮触发为主，但也可以给第三步加个防抖自动触发
+        
+        let debounceTimer;
+        document.getElementById('img-urls').addEventListener('input', () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(renderImages, 800); // 停止输入 800ms 后自动刷新图片
+        });
+
+    </script>
+</body>
+</html>
